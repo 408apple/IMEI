@@ -5,7 +5,7 @@
 # IMEI Query System
 This application is a tool that makes it easy to query sim card IMEI numbers and get information.
 
-<h1 align="center">Searcher Logo</h1>
+<h1 align="center">IMEI Query System Logo</h1>
 
 <p align="center">
   <img src="imeilo.png" alt="IMEI Logo" width="150" height="150">
