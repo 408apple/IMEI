@@ -3,7 +3,7 @@
 </a>
 
 # IMEI Query System
-This application is a tool that makes it easy to query sim card IMEI numbers and get information.
+This application is a tool that makes it easy to query sim card IMEI numbers and retrieve information.
 
 <h1 align="center">IMEI Query System Logo</h1>
 
