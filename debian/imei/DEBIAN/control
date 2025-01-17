@@ -1,0 +1,10 @@
+Package: imei
+Version: 1.0
+Architecture: all
+Maintainer: Fatih ÖNDER <fatih@algyazilim.com>
+Installed-Size: 66
+Depends: python3, python3-pyqt5, python3-requests, python3-bs4, python3-urllib3
+Section: utils
+Priority: optional
+Homepage: https://algyazilim.com
+Description: This application is a tool that makes it easy to query sim card IMEI numbers and get information.

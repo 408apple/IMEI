@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=imei
+Comment=IMEI Numarası Sorgulama Aracı
+Exec=python3 /usr/bin/imei.py
+Icon=/usr/share/icons/hicolor/48x48/apps/imeilo.png
+Terminal=false
+Categories=Utility;
+
+
+Name[tr_TR]=IMEI Sorgulama
+

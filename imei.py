@@ -1,0 +1,680 @@
+import sys
+import requests
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import *
+from PyQt5.QtGui import *
+from bs4 import BeautifulSoup
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import os
+import platform
+import json
+from pathlib import Path
+
+class IMEISorgulamaApp(QMainWindow):
+    def get_system_paths(self):
+        """İşletim sistemine göre yolları belirle"""
+        system = platform.system()
+        if system == "Windows":
+            app_data = os.getenv('APPDATA')
+            paths = {
+                'config': os.path.join(app_data, 'IMEISorgulama'),
+                'icons': [
+                    os.path.join(os.path.dirname(__file__), "imeilo.png"),
+                    os.path.join(app_data, 'IMEISorgulama', 'icons', 'imeilo.png'),
+                    os.path.join(os.getcwd(), "imeilo.png")
+                ]
+            }
+        elif system == "Darwin":  # macOS
+            home = os.path.expanduser("~")
+            paths = {
+                'config': os.path.join(home, 'Library', 'Application Support', 'IMEISorgulama'),
+                'icons': [
+                    os.path.join(os.path.dirname(__file__), "imeilo.png"),
+                    os.path.join(home, 'Library', 'Application Support', 'IMEISorgulama', 'icons', 'imeilo.png'),
+                    "/Applications/IMEISorgulama.app/Contents/Resources/imeilo.png",
+                    os.path.join(os.getcwd(), "imeilo.png")
+                ]
+            }
+        else:  # Linux ve diğerleri
+            home = os.path.expanduser("~")
+            paths = {
+                'config': os.path.join(home, '.config', 'IMEISorgulama'),
+                'icons': [
+                    os.path.join(os.path.dirname(__file__), "imeilo.png"),
+                    "/usr/share/icons/hicolor/48x48/apps/imeilo.png",
+                    "/usr/local/share/icons/imeilo.png",
+                    os.path.join(os.getcwd(), "imeilo.png")
+                ]
+            }
+        
+        # Config klasörünü oluştur
+        os.makedirs(paths['config'], exist_ok=True)
+        return paths
+
+    def get_icon_path(self):
+        """Simge dosyasının yolunu döndürür."""
+        paths = self.get_system_paths()
+        icon_paths = paths['icons']
+        
+        if hasattr(sys, "_MEIPASS"):
+            icon_paths.insert(0, os.path.join(sys._MEIPASS, "imeilo.png"))
+            
+        for path in icon_paths:
+            if os.path.exists(path):
+                return path
+        return None
+
+    def get_logo_path(self):
+        """Logo dosyasının yolunu döndürür."""
+        return self.get_icon_path()
+
+    def __init__(self):
+        super().__init__()
+        
+        # Config ve geçmiş dosyası yolları
+        self.config_dir = os.path.join(str(Path.home()), '.config', 'IMEISorgulama')
+        self.history_file = os.path.join(self.config_dir, 'imei_history.json')
+        
+        # IMEISorgulama klasörünü kontrol et
+        if not os.path.exists(self.config_dir):
+            os.makedirs(self.config_dir)
+        
+        # Geçmiş dosyası yoksa oluştur
+        if not os.path.exists(self.history_file):
+            with open(self.history_file, 'w') as f:
+                json.dump([], f)
+        
+        # Ana menüyü oluştur (tek seferlik)
+        menubar = self.menuBar()
+        
+        # Ana menü öğelerini ekle
+        self.history_menu = menubar.addMenu('Geçmiş')
+        help_menu = menubar.addMenu('Yardım')
+        
+        # Yardım menüsü için eylemler
+        about_action = QAction('Hakkında', self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+        
+        # Geçmişi yükle
+        self.load_imei_history()
+        
+        # QSettings için organizasyon ve uygulama adı
+        QCoreApplication.setOrganizationName("ALG")
+        QCoreApplication.setApplicationName("IMEISorgulama")
+        
+        # Platform bağımsız QSettings
+        if platform.system() == "Linux":
+            self.settings = QSettings(QSettings.NativeFormat, QSettings.UserScope,
+                                   "ALG", "IMEISorgulama")
+        else:
+            self.settings = QSettings()
+
+        self.setWindowTitle("IMEI Sorgulama Sistemi")
+        self.setFixedSize(400, 400)  # Sabit pencere boyutu
+        
+        # Logo ve icon yollarını ayarla
+        self.LOGO_PATH = self.get_logo_path()
+        icon_path = self.get_icon_path()
+        if (icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2b2b2b;
+            }
+            QMenuBar {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                border-bottom: 1px solid #363636;
+            }
+            QMenuBar::item {
+                background-color: transparent;
+                padding: 8px 12px;
+            }
+            QMenuBar::item:selected {
+                background-color: #363636;
+                color: #ffffff;
+            }
+            QMenuBar::item:pressed {
+                background-color: #404040;
+            }
+            QMenu {
+                background-color: #1e1e1e;
+                border: 1px solid #363636;
+            }
+            QMenu::item {
+                padding: 6px 24px 6px 12px;
+                color: #ffffff;
+            }
+            QMenu::item:selected {
+                background-color: #363636;
+            }
+            QLabel {
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                background-color: #363636;
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton {
+                background-color: #0d47a1;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+            QTextEdit {
+                background-color: #363636;
+                color: #ffffff;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                padding: 8px;
+            }
+        """)
+
+        # Ana widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # IMEI girişi
+        imei_layout = QHBoxLayout()
+        self.imei_input = QLineEdit()
+        self.imei_input.setPlaceholderText("IMEI numarasını girin")
+        self.imei_input.setMaxLength(15)
+        self.imei_input.returnPressed.connect(self.imei_sorgula)  # Enter tuşu için bağlantı
+        imei_layout.addWidget(self.imei_input)
+
+        # Sorgula butonu
+        self.sorgula_btn = QPushButton("Sorgula")
+        self.sorgula_btn.clicked.connect(self.imei_sorgula)
+        imei_layout.addWidget(self.sorgula_btn)
+        layout.addLayout(imei_layout)
+
+        # Sonuç alanı
+        self.sonuc_alani = QTextEdit()
+        self.sonuc_alani.setReadOnly(True)
+        self.sonuc_alani.setMinimumHeight(200)
+        
+        # Kısayolları aktif et
+        self.sonuc_alani.setContextMenuPolicy(Qt.DefaultContextMenu)
+        
+        # Kopyalama kısayolları için QAction'lar
+        copy_action = QAction('Kopyala', self)
+        copy_action.setShortcut('Ctrl+C')
+        copy_action.triggered.connect(self.sonuc_alani.copy)
+        self.addAction(copy_action)
+        
+        paste_action = QAction('Yapıştır', self)
+        paste_action.setShortcut('Ctrl+V')
+        paste_action.triggered.connect(self.sonuc_alani.paste)
+        self.addAction(paste_action)
+        
+        select_all_action = QAction('Tümünü Seç', self)
+        select_all_action.setShortcut('Ctrl+A')
+        select_all_action.triggered.connect(self.sonuc_alani.selectAll)
+        self.addAction(select_all_action)
+        
+        layout.addWidget(self.sonuc_alani)
+
+        # Durum çubuğu ekleme
+        self.statusBar().showMessage('Hazır')
+        
+        # Sonuç alanı için stil geliştirmesi
+        self.sonuc_alani.setStyleSheet("""
+            QTextEdit {
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 13px;
+                line-height: 1.5;
+            }
+        """)
+        
+        # IMEI input için validator
+        self.imei_input.setValidator(QRegExpValidator(QRegExp("[0-9]{15}")))
+
+        # Progress bar ekle
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #555;
+                border-radius: 4px;
+                background-color: #2d2d2d;
+                height: 8px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+                border-radius: 4px;
+            }
+        """)
+        self.progress_bar.hide()
+        layout.addWidget(self.progress_bar)
+        
+        # Timer ekle
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_progress)
+        self.progress_value = 0
+
+        # QSettings tanımlama
+        self.settings = QSettings('ALG', 'IMEISorgulama')
+        
+        # Menü çubuğu ekle
+        menubar = self.menuBar()
+        
+        # Statusbar stilini güncelle
+        self.statusBar().setStyleSheet("""
+            QStatusBar {
+                background-color: #1e1e1e;
+                color: #ffffff;
+                font-family: 'Segoe UI', 'Arial', sans-serif;
+                font-size: 13px;
+                padding: 5px 10px;
+                border-top: 1px solid #363636;
+            }
+            QStatusBar::item {
+                border: none;
+                margin: 0;
+                padding: 0;
+            }
+        """)
+
+
+        
+
+
+        # Config dizini oluştur
+        self.config_dir = os.path.join(str(Path.home()), '.config', 'IMEISorgulama')
+        self.history_file = os.path.join(self.config_dir, 'imei_history.json')
+        os.makedirs(self.config_dir, exist_ok=True)
+
+        # Minimum pencere boyutunu ayarla
+        self.setMinimumSize(400, 200)
+        
+        # Sonuç alanını başlangıçta gizle
+        self.sonuc_alani.hide()
+        
+        # Pencereyi küçük boyutta başlat
+        self.resize(400, 200)
+
+    def get_user_agent(self):
+        try:
+            response = requests.get("https://iplogger.org/useragents/?device=chrome&count=1")
+            soup = BeautifulSoup(response.text, 'html.parser')
+            user_agent = soup.find('div', {'class': 'copy'})
+            return user_agent.text if user_agent else "Mozilla/5.0"
+        except:
+            return "Mozilla/5.0"
+
+    def format_sonuc(self, sonuc_text):
+        # Sonucu parçala
+        data = {}
+        parts = sonuc_text.split('IMEI')
+        if len(parts) > 1:
+            imei = parts[1].split('Durum')[0].strip()
+            data['IMEI'] = imei
+            
+        if 'Durum' in sonuc_text:
+            durum = sonuc_text.split('Durum')[1].split('Kaynak')[0].strip()
+            data['Durum'] = durum
+            
+        if 'Kaynak' in sonuc_text:
+            kaynak = sonuc_text.split('Kaynak')[1].split('Sorgu')[0].strip()
+            data['Kaynak'] = kaynak
+            
+        if 'Sorgu Tarihi' in sonuc_text:
+            tarih = sonuc_text.split('Sorgu Tarihi')[1].split('Marka')[0].strip()
+            data['Sorgu Tarihi'] = tarih
+            
+        if 'Marka' in sonuc_text:
+            marka = sonuc_text.split('Marka:')[1].split('Bu sorgulama')[0].strip()
+            data['Marka/Model'] = marka
+
+        # HTML formatında sonuç oluştur
+        html = f"""
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; padding: 15px;">
+            <div style="background: #1a1a1a; border-radius: 8px; padding: 20px; margin-bottom: 10px;">
+                <h3 style="color: #4CAF50; margin: 0 0 15px 0;">IMEI Sorgulama Sonucu</h3>
+                <div style="color: #ffffff;">
+                    <p style="margin: 8px 0;"><strong style="color: #90CAF9;">IMEI:</strong> {data.get('IMEI', '-')}</p>
+                    <p style="margin: 8px 0;"><strong style="color: #90CAF9;">Durum:</strong> {data.get('Durum', '-')}</p>
+                    <p style="margin: 8px 0;"><strong style="color: #90CAF9;">Kaynak:</strong> {data.get('Kaynak', '-')}</p>
+                    <p style="margin: 8px 0;"><strong style="color: #90CAF9;">Sorgu Tarihi:</strong> {data.get('Sorgu Tarihi', '-')}</p>
+                    <p style="margin: 8px 0;"><strong style="color: #90CAF9;">Marka/Model:</strong> {data.get('Marka/Model', '-')}</p>
+                </div>
+            </div>
+            <div style="background: #2d2d2d; border-radius: 4px; padding: 10px; font-size: 12px; color: #888;">
+                <em>Bu sorgulama bilgilendirme amaçlıdır, kesin kayıt değildir.</em>
+            </div>
+        </div>
+        """
+        return html
+
+    def update_progress(self):
+        self.progress_value += 1
+        self.progress_bar.setValue(self.progress_value)
+        if self.progress_value >= 100:
+            self.timer.stop()
+            self.progress_bar.hide()
+
+    def show_captcha_dialog(self, captcha_url, session, headers):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Güvenlik Kodu")
+        dialog.setFixedSize(300, 200)
+        
+        layout = QVBoxLayout()
+        
+        # Captcha resmi için
+        captcha_label = QLabel()
+        try:
+            captcha_response = session.get(captcha_url, headers=headers)
+            if captcha_response.status_code == 200:
+                pixmap = QPixmap()
+                pixmap.loadFromData(captcha_response.content)
+                captcha_label.setPixmap(pixmap)
+                captcha_label.setAlignment(Qt.AlignCenter)
+        except Exception as e:
+            return None
+        
+        # Captcha giriş alanı
+        captcha_input = QLineEdit()
+        captcha_input.setPlaceholderText("Güvenlik kodunu girin")
+        captcha_input.setMaxLength(5)
+        captcha_input.setAlignment(Qt.AlignCenter)
+        
+        # Doğrula butonu
+        verify_btn = QPushButton("Doğrula")
+        verify_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0d47a1;
+                color: white;
+                padding: 8px 16px;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+        """)
+        
+        layout.addWidget(captcha_label)
+        layout.addWidget(captcha_input)
+        layout.addWidget(verify_btn)
+        layout.setSpacing(10)
+        dialog.setLayout(layout)
+        
+        # Buton tıklama olayı
+        verify_btn.clicked.connect(dialog.accept)
+        
+        if dialog.exec_() == QDialog.Accepted:
+            return captcha_input.text()
+        return None
+
+    def imei_sorgula(self):
+        # Sorgu başladığında sonuç alanını gizle ve pencereyi küçült
+        self.sonuc_alani.hide()
+        self.resize(400, 200)
+        
+        imei = self.imei_input.text().strip()
+        if len(imei) == 15 and imei.isdigit():
+            self.save_to_history(imei)
+            
+        try:
+            session = requests.Session()
+            session.verify = False
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.turkiye.gov.tr/imei-sorgulama'
+            }
+
+            self.statusBar().showMessage('Sorgu yapılıyor...')
+            self.progress_bar.show()
+            self.progress_value = 0
+            self.timer.start(30)
+
+            # İlk önce güvenlik kodsuz deneme
+            response = session.get("https://www.turkiye.gov.tr/imei-sorgulama", headers=headers)
+            
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                form = soup.find('form', {'name': 'mainForm'})
+                
+                if form:
+                    # Token al
+                    token = None
+                    token_input = form.find('input', {'name': 'token'})
+                    if token_input:
+                        token = token_input.get('value', '')
+                    else:
+                        body = soup.find('body')
+                        if body:
+                            token = body.get('data-token', '')
+
+                    if token:
+                        # Önce güvenlik kodsuz dene
+                        data = {
+                            'txtImei': self.imei_input.text().strip(),
+                            'token': token,
+                            'submit': 'Sorgula'
+                        }
+                        
+                        response = session.post(
+                            "https://www.turkiye.gov.tr/imei-sorgulama?submit",
+                            headers=headers,
+                            data=data
+                        )
+                        
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        
+                        # Güvenlik kodu gerekiyorsa
+                        if 'captchaImage' in response.text:
+                            captcha_img = soup.find('img', {'class': 'captchaImage'})
+                            if captcha_img:
+                                captcha_url = f"https://www.turkiye.gov.tr{captcha_img.get('src', '')}"
+                                captcha_code = self.show_captcha_dialog(captcha_url, session, headers)
+                                
+                                if captcha_code:
+                                    data['captcha_name'] = captcha_code
+                                    response = session.post(
+                                        "https://www.turkiye.gov.tr/imei-sorgulama?submit",
+                                        headers=headers,
+                                        data=data
+                                    )
+                        
+                        result = soup.find('div', {'class': ['sonuc-bilgi', 'resultContainer']})
+                        if result:
+                            sonuc_text = result.get_text(strip=True)
+                            formatted_html = self.format_sonuc(sonuc_text)
+                            self.sonuc_alani.setHtml(formatted_html)
+                            
+                            try:
+                                # Marka/Model bilgisini çıkar
+                                if 'Marka' in sonuc_text:
+                                    model_text = sonuc_text.split('Marka')[1].split(':')[1].split('Bu')[0].strip()
+                                    # Modeli kaydet
+                                    self.save_to_history(self.imei_input.text().strip(), model_text)
+                                else:
+                                    self.save_to_history(self.imei_input.text().strip(), "Model bilgisi bulunamadı")
+                            except Exception as e:
+                                print(f"Model bilgisi işlenirken hata: {e}")
+                                self.save_to_history(self.imei_input.text().strip(), "")
+                                
+                            self.statusBar().showMessage('Sorgu tamamlandı')
+                            # Sonuçları göster ve pencereyi büyüt
+                            self.sonuc_alani.show()
+                            self.resize(800, 600)
+                        else:
+                            self.sonuc_alani.setText("Sunucu Hatası Oluştu. Sorgulama Butonuna Tekrar Basın!")
+                    else:
+                        self.sonuc_alani.setText("Token bulunamadı.")
+                else:
+                    self.sonuc_alani.setText("Form bulunamadı.")
+            else:
+                self.sonuc_alani.setText(f"Sunucu yanıt vermedi: {response.status_code}")
+                
+        except Exception as e:
+            self.sonuc_alani.setText(f"Hata: {str(e)}")
+            self.statusBar().showMessage('Hata oluştu')
+            # Hata durumunda sonuç alanını göster
+            self.sonuc_alani.show()
+            self.resize(800, 600)
+        finally:
+            self.progress_bar.hide()
+            self.timer.stop()
+            session.close()
+
+    def show_about(self):
+        about_dialog = QDialog(self)
+        about_dialog.setWindowTitle("Hakkında")
+        about_dialog.setFixedSize(400, 500)
+        
+        layout = QVBoxLayout()
+        
+        # Logo
+        logo_label = QLabel()
+        logo_path = self.get_logo_path()  # Logo dosyası proje dizininde olmalı
+        if logo_path:
+            pixmap = QPixmap(logo_path)
+            scaled_pixmap = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            logo_label.setPixmap(scaled_pixmap)
+            logo_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(logo_label)
+        
+        # Başlık
+        title_label = QLabel("IMEI Sorgulama Sistemi")
+        title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2196F3;")
+        title_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Bilgi metni
+        info_text = QLabel("""
+        <div style='text-align: center;'>
+            <p>Bu program, IMEI numarası sorgulama işlemlerini kolaylaştırmak için geliştirilmiştir.</p>
+            <br>
+            <p>Geliştirici: ALG Yazılım Inc.©</p>
+            <p>www.algyazilim.com | info@algyazilim.com</p>
+            <p>Fatih ÖNDER (CekToR) | fatih@algyazilim.com</p>
+            <p>GitHub: https://github.com/cektor</p>
+            <p>Sürüm: 1.0</p>
+            <p>ALG Yazılım Pardus'a Göç'ü Destekler.</p>
+            <p>Telif Hakkı © 2025 GNU</p>
+        </div>
+        """)
+        info_text.setOpenExternalLinks(True)
+        info_text.setWordWrap(True)
+        layout.addWidget(info_text)
+        
+        about_dialog.setLayout(layout)
+        about_dialog.setStyleSheet("""
+            QDialog {
+                background-color: #2b2b2b;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+        """)
+        
+        about_dialog.exec_()
+
+    def format_menu_text(self, imei, model):
+        """Menü öğesi için metni formatla"""
+        if model:
+            return f"{model} - {imei}"
+        return imei
+
+    def save_to_history(self, imei, model=""):
+        try:
+            if os.path.exists(self.history_file):
+                with open(self.history_file, 'r') as f:
+                    history = json.load(f)
+            else:
+                history = []
+
+            # Mevcut IMEI'yi listeden kaldır ve yeni kaydı ekle
+            history = [item for item in history if isinstance(item, dict) and item.get('imei') != imei]
+            history.insert(0, {'imei': imei, 'model': model})
+            history = history[:10]  # Son 10 kayıt
+
+            # JSON'a kaydet
+            with open(self.history_file, 'w') as f:
+                json.dump(history, f)
+                
+            self.load_imei_history()
+            
+        except Exception as e:
+            print(f"Geçmiş kaydedilirken hata: {e}")
+
+    def load_imei_history(self):
+        """IMEI geçmişini JSON dosyasından yükle"""
+        self.history_menu.clear()
+        try:
+            if os.path.exists(self.history_file):
+                with open(self.history_file, 'r') as f:
+                    history = json.load(f)
+                    
+                if isinstance(history, list):
+                    for item in history:
+                        if isinstance(item, dict):
+                            imei = item.get('imei', '')
+                            model = item.get('model', '')
+                            menu_text = self.format_menu_text(imei, model)
+                            action = QAction(menu_text, self)
+                            action.triggered.connect(lambda checked, i=imei: self.load_imei(i))
+                            self.history_menu.addAction(action)
+                        elif isinstance(item, str):  # Eski format desteği
+                            action = QAction(item, self)
+                            action.triggered.connect(lambda checked, i=item: self.load_imei(i))
+                            self.history_menu.addAction(action)
+                    
+                    if len(history) > 0:
+                        self.history_menu.addSeparator()
+                        clear_action = QAction('Geçmişi Temizle', self)
+                        clear_action.triggered.connect(self.clear_history)
+                        self.history_menu.addAction(clear_action)
+                else:
+                    empty_action = QAction('Geçmiş Boş', self)
+                    empty_action.setEnabled(False)
+                    self.history_menu.addAction(empty_action)
+            else:
+                empty_action = QAction('Geçmiş Boş', self)
+                empty_action.setEnabled(False)
+                self.history_menu.addAction(empty_action)
+        except Exception as e:
+            print(f"Geçmiş yüklenirken hata: {e}")
+            self.history_menu.addAction(QAction('Geçmiş Yüklenemedi', self))
+
+    def clear_history(self):
+        """Geçmiş JSON dosyasını temizle"""
+        try:
+            if os.path.exists(self.history_file):
+                os.remove(self.history_file)
+            self.load_imei_history()
+        except Exception as e:
+            print(f"Geçmiş temizlenirken hata: {e}")
+
+    def load_imei(self, imei):
+        """Seçilen IMEI'yi yükle ve sorgula"""
+        self.imei_input.setText(imei)
+        self.imei_sorgula()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    main_window = IMEISorgulamaApp()
+    main_window.show()
+    sys.exit(app.exec_())

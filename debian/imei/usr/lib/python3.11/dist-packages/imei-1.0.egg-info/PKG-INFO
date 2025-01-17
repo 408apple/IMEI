@@ -1,0 +1,7 @@
+Metadata-Version: 2.1
+Name: imei
+Version: 1.0
+Summary: This application is a tool that makes it easy to query sim card IMEI numbers and get information.
+Home-page: https://github.com/cektor/IMEI
+Author: Fatih Önder
+Author-email: fatih@algyazilim.com

@@ -1,0 +1,9 @@
+imei.desktop
+imeilo.png
+setup.py
+imei.egg-info/PKG-INFO
+imei.egg-info/SOURCES.txt
+imei.egg-info/dependency_links.txt
+imei.egg-info/entry_points.txt
+imei.egg-info/requires.txt
+imei.egg-info/top_level.txt

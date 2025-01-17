@@ -1,0 +1,4 @@
+#!/bin/bash
+imei.py usr/bin/
+imei.desktop usr/share/applications/
+debian/imeilo.png /usr/share/icons/hicolor/48x48/apps/
